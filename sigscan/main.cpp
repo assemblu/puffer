@@ -386,14 +386,16 @@ found_scene:
 
 void resolve_pawn_position(HANDLE hProcess, uintptr_t controller, uintptr_t entity_list_value,
                            uintptr_t client_base, SIZE_T client_size) {
+    // cs2-dumper entity list needs +0x10 to reach chunk array
+    uintptr_t chunkArrayBase = entity_list_value + 0x10;
     std::cout << "\n=== Position Chain — Brute Force Entity Scan ===" << std::endl;
-    std::cout << "[+] Entity list anchor value (chunk array base): " << std::hex << entity_list_value << std::endl;
+    std::cout << "[+] Entity list base: " << std::hex << entity_list_value << " chunk array: " << chunkArrayBase << std::endl;
     
   
     int max_chunk = 0;
     for (int c = 0; c < 64; c++) {
         uintptr_t cb = 0;
-        read(hProcess, entity_list_value + (c * 8), cb);
+        read(hProcess, chunkArrayBase + (c * 8), cb);
         if (cb) max_chunk = c;
     }
     std::cout << "[+] Allocated chunks: 0-" << std::dec << max_chunk << std::endl;
@@ -403,7 +405,7 @@ void resolve_pawn_position(HANDLE hProcess, uintptr_t controller, uintptr_t enti
     
     for (int c = 0; c <= max_chunk && c < 64; c++) {
         uintptr_t chunk_base = 0;
-        if (!read(hProcess, entity_list_value + (c * 8), chunk_base)) continue;
+        if (!read(hProcess, chunkArrayBase + (c * 8), chunk_base)) continue;
         if (!chunk_base) continue;
         
         for (int e = 0; e < 512; e++) {
@@ -455,7 +457,7 @@ void resolve_pawn_position(HANDLE hProcess, uintptr_t controller, uintptr_t enti
           
             int ci = idx >> 9, ei = idx & 0x1FF;
             uintptr_t cb = 0;
-            read(hProcess, entity_list_value + (ci * 8), cb);
+            read(hProcess, chunkArrayBase + (ci * 8), cb);
             if (!cb) continue;
             uintptr_t ep = 0;
             read(hProcess, cb + (ei * 0x70) + 8, ep);
@@ -477,7 +479,7 @@ void resolve_pawn_position(HANDLE hProcess, uintptr_t controller, uintptr_t enti
     std::cout << "\n=== m_vecOrigin Validation ===" << std::endl;
     for (int c = 0; c <= max_chunk && c < 64; c++) {
         uintptr_t chunk_base = 0;
-        if (!read(hProcess, entity_list_value + (c * 8), chunk_base)) continue;
+        if (!read(hProcess, chunkArrayBase + (c * 8), chunk_base)) continue;
         if (!chunk_base) continue;
         for (int e = 0; e < 512; e++) {
             uintptr_t slot = chunk_base + (e * 0x70);
@@ -788,6 +790,93 @@ int main() {
     if (entity_list_addr) {
         std::cout << "[+] dwEntityList: " << std::hex << entity_list_addr
                   << " (RVA: " << (entity_list_addr - client_base) << ")" << std::endl;
+    }
+
+    // DEBUG: scan all 64 controller slots
+    std::cout << "\n=== Controller Array Scan ===" << std::endl;
+    uintptr_t ctrlArrayPtr = 0;
+    read(hProcess, global_addr_ctrl, ctrlArrayPtr);
+    std::cout << "[+] Global: " << std::hex << global_addr_ctrl << " (RVA " << (global_addr_ctrl - client_base) << ")" << std::endl;
+    std::cout << "[+] Dereferenced: " << ctrlArrayPtr << std::endl;
+    std::cout << "[+] Scanning 64 slots at stride 0x8..." << std::endl;
+
+    int validCtrl = 0;
+    for (int s = 0; s < 64; s++) {
+        uintptr_t ctrl = 0;
+        if (!read(hProcess, ctrlArrayPtr + s * 8, ctrl)) continue;
+        if (!ctrl || ctrl < 0x100000000ULL || ctrl >= 0x7fff00000000ULL) continue;
+        validCtrl++;
+
+        uint32_t hp = 0;
+        uint8_t alive = 0;
+        uint32_t handle = 0;
+        read(hProcess, ctrl + OFF_PAWN_HEALTH, hp);
+        read(hProcess, ctrl + OFF_PAWN_IS_ALIVE, alive);
+        read(hProcess, ctrl + 0x90C, handle);
+        uint32_t idx = handle & 0x7FFF;
+
+        std::cout << "  Slot " << std::dec << s << ": ctrl=" << std::hex << ctrl
+                  << " HP=" << std::dec << hp << " alive=" << (int)alive
+                  << " handle=0x" << std::hex << handle << " idx=" << std::dec << idx;
+
+        if (idx > 0 && idx != 0x7FFF && entity_list_addr) {
+            int chunk = idx >> 9;
+            int entry = idx & 0x1FF;
+            uintptr_t elBase = 0;
+            read(hProcess, entity_list_addr, elBase);
+            if (elBase) {
+                uintptr_t chunkBase = 0;
+                read(hProcess, elBase + 0x10 + chunk * 8, chunkBase);
+                if (chunkBase) {
+                    uintptr_t entity = 0;
+                    read(hProcess, chunkBase + entry * 0x70 + 8, entity);
+                    if (entity > 0x100000000ULL && entity < 0x7fff00000000ULL) {
+                        uintptr_t sn = 0;
+                        read(hProcess, entity + 0x330, sn);
+                        if (sn > 0x100000000ULL && sn < 0x7fff00000000ULL) {
+                            float pos[3] = {0};
+                            read(hProcess, sn + 0xC8, pos);
+                            bool nan = (pos[0] != pos[0] || pos[1] != pos[1] || pos[2] != pos[2]);
+                            bool huge = (pos[0] < -100000 || pos[0] > 100000 || pos[1] < -100000 || pos[1] > 100000);
+                            if (!nan && !huge) {
+                                std::cout << " -> ent=" << std::hex << entity
+                                          << " pos=(" << std::fixed << pos[0] << "," << pos[1] << "," << pos[2] << ")";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::cout << std::endl;
+    }
+    std::cout << "[+] Valid controllers: " << std::dec << validCtrl << "/64" << std::endl;
+
+    // DEBUG: try entity system controller list
+    std::cout << "\n=== Entity System Controller List ===" << std::endl;
+    if (entity_list_addr) {
+        uintptr_t elBase = 0;
+        read(hProcess, entity_list_addr, elBase);
+        std::cout << "[+] entity_list global: " << std::hex << entity_list_addr << " (RVA " << (entity_list_addr - client_base) << ")" << std::endl;
+        std::cout << "[+] elBase (deref): " << elBase << std::endl;
+        if (elBase > 0x100000000ULL) {
+            uintptr_t ctrlList = 0;
+            read(hProcess, elBase + 0x10, ctrlList);
+            std::cout << "[+] ctrlList (base+0x10): " << ctrlList << std::endl;
+            if (ctrlList > 0x100000000ULL) {
+                int found = 0;
+                for (int i = 0; i < 64; i++) {
+                    uintptr_t ctrl = 0;
+                    read(hProcess, ctrlList + i * 0x78, ctrl);
+                    if (ctrl > 0x100000000ULL && ctrl < 0x7fff00000000ULL) {
+                        found++;
+                        uint32_t hp = 0;
+                        read(hProcess, ctrl + OFF_PAWN_HEALTH, hp);
+                        std::cout << "  i=" << std::dec << i << ": ctrl=" << std::hex << ctrl << " HP=" << std::dec << hp << std::endl;
+                    }
+                }
+                std::cout << "[+] Found " << std::dec << found << "/64 controllers via entity system" << std::endl;
+            }
+        }
     }
 
     std::cout << "\n[*] Press Enter to start live monitoring (HP + ViewMatrix every 500ms)..." << std::endl;
