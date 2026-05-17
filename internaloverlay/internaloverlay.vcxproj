@@ -23,6 +23,7 @@
     <CharacterSet>Unicode</CharacterSet>
     <OutDir>$(ProjectDir)</OutDir>
     <IntDir>$(ProjectDir)x64\$(Configuration)\</IntDir>
+    <PreBuildEvent>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)increment_version.ps1" -HeaderPath "$(ProjectDir)version.h"</PreBuildEvent>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
@@ -32,6 +33,7 @@
     <CharacterSet>Unicode</CharacterSet>
     <OutDir>$(ProjectDir)</OutDir>
     <IntDir>$(ProjectDir)x64\$(Configuration)\</IntDir>
+    <PreBuildEvent>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)increment_version.ps1" -HeaderPath "$(ProjectDir)version.h"</PreBuildEvent>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -85,9 +87,12 @@
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Include="logger.cpp" />
+    <ClCompile Include="esp_config.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="logger.h" />
+    <ClInclude Include="esp_config.h" />
+    <ClInclude Include="version.h" />
     <ClInclude Include="MinHook.h" />
     <ClInclude Include="buffer.h" />
     <ClInclude Include="trampoline.h" />

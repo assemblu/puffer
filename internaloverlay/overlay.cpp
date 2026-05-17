@@ -19,6 +19,11 @@
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx11.h"
 
+#include "esp_config.h"
+#include "version.h"
+
+EspConfig g_config;
+
 
 
 #include "minhook.h"
@@ -167,13 +172,36 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         ImGui::Begin("CS2 Overlay", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
         
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "pwned by assemblu");
+        ImGui::Text("Build: %d", VERSION_BUILD);
         ImGui::Separator();
         ImGui::Text("FPS: %.1f", io.Framerate);
         ImGui::Text("Resolution: %.0fx%.0f", io.DisplaySize.x, io.DisplaySize.y);
         ImGui::Text("Delta Time: %.3f ms", io.DeltaTime * 1000.0f);
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Press DEL to toggle");
-        
+
+        // Loaded offsets
+        ImGui::Separator();
+        if (g_config.IsValid()) {
+            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Config: VALID");
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Config: INVALID");
+        }
+        ImGui::Text("dwLocalPlayerController: 0x%llX", g_config.dwLocalPlayerController);
+        ImGui::Text("dwViewMatrix:            0x%llX", g_config.dwViewMatrix);
+        ImGui::Text("dwEntityList:            0x%llX", g_config.dwEntityList);
+        ImGui::Separator();
+        ImGui::Text("m_hPlayerPawn:           0x%llX", g_config.m_hPlayerPawn);
+        ImGui::Text("m_iPawnHealth:           0x%llX", g_config.m_iPawnHealth);
+        ImGui::Text("m_bPawnIsAlive:          0x%llX", g_config.m_bPawnIsAlive);
+        ImGui::Text("m_iPawnArmor:            0x%llX", g_config.m_iPawnArmor);
+        ImGui::Separator();
+        ImGui::Text("m_pGameSceneNode:        0x%llX", g_config.m_pGameSceneNode);
+        ImGui::Text("m_vecAbsOrigin:          0x%llX", g_config.m_vecAbsOrigin);
+        ImGui::Text("m_vecOrigin:             0x%llX", g_config.m_vecOrigin);
+        ImGui::Separator();
+        ImGui::Text("chunks: %u | ents/chunk: %u | stride: 0x%llX", g_config.chunkCount, g_config.entitiesPerChunk, g_config.entryStride);
+
         ImGui::End();
     }
 
@@ -215,7 +243,16 @@ void HookThread() {
     }
     OverlayLog(L"[overlay] client.dll found!");
 
-    
+    // Load offsets.json
+    {
+        const wchar_t* configPath = L"C:\\Users\\emirg\\dev\\puffer\\internaloverlay\\offsets.json";
+        OverlayLog(L"[overlay] Loading config from: %s", configPath);
+        if (g_config.Load(configPath)) {
+            OverlayLog(L"[overlay] Config loaded successfully");
+        } else {
+            OverlayLog(L"[overlay] Config load FAILED — using zeroed offsets");
+        }
+    }
 
     if (MH_Initialize() != MH_OK) {
         OverlayLog(L"[overlay] MinHook initialization failed");

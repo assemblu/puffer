@@ -10,6 +10,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 # Source files for the DLL
 set(SRC_FILES
     overlay.cpp
+    esp_config.cpp
     imgui.cpp
     imgui_draw.cpp
     imgui_widgets.cpp
